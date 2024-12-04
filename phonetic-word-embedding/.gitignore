@@ -1,0 +1,15 @@
+.DS_Store
+.vscode
+.pytest_cache
+**/.pyc
+**/__pycache__
+**/build/
+**/dist/
+**/*.egg-info/
+**/checkpoints/
+**/model.tf/
+**/*.so
+data/
+**/nohup.out
+**/*_wrapper.cpp
+**/simvecs*
