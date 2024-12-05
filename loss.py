@@ -124,6 +124,7 @@ class BERTLoss:
         cosine_sim = cosine_sim.clamp(min=0, max=1)
         return 1 - cosine_sim.mean()
 
+
 class RhymeLoss:
     def __init__(self, dictionary, num_words=1, position_weight_factor=1.0):
         """
@@ -159,62 +160,51 @@ class RhymeLoss:
         return words[-num_words:]
 
     def __call__(self, previous_lines, generated_line):
-        """
-        Calculate rhyme loss between previous lines and the generated line.
-
-        Parameters:
-        - previous_lines (list of str): List of previous lyric lines.
-        - generated_line (str): Generated lyric line.
-
-        Returns:
-        - torch.Tensor: Calculated loss value.
-        """
-        # Extract tail words from the generated line
         generated_tail_words = self._get_tail_words(generated_line, self.num_words)
-        print(f'[Debug] tail of generated output : {generated_tail_words}')
+        #print(f'[Debug] tail of generated output : {generated_tail_words}')
 
-        # Initialize storage for weights and losses
         weights = []
         positional_weights = []
         all_positional_losses = []
         num_lines = len(previous_lines)
 
         for idx, prev_line in enumerate(previous_lines):
-            # Extract tail words from the previous line
             prev_tail_words = self._get_tail_words(prev_line, self.num_words)
-            # Determine the actual number of words to compare
             effective_num_words = min(len(prev_tail_words), len(generated_tail_words))
 
-            # Compute positional losses
             positional_losses = []
             for i in range(effective_num_words):
-                similarity = self.dictionary.score(prev_tail_words[i], generated_tail_words[i])
-                loss = 1 - similarity  # Maximize similarity
+                try:
+                    similarity = self.dictionary.score(prev_tail_words[i], generated_tail_words[i])
+                    loss = 1 - similarity
+                    #print(f"Similarity for {prev_tail_words[i]} and {generated_tail_words[i]}: {similarity}")
+                except KeyError:
+                    #print(f"Word pair not found in dictionary: {prev_tail_words[i]}, {generated_tail_words[i]}")
+                    loss = 1
                 positional_losses.append(loss)
             all_positional_losses.append(positional_losses)
 
-            # Compute average similarity
             if len(positional_losses) > 0:
-                avg_similarity = sum([1 - loss for loss in positional_losses]) / len(positional_losses)
+                avg_loss = sum(positional_losses) / len(positional_losses)
             else:
-                avg_similarity = 0  # No comparison possible, fallback to 0 similarity
-            weights.append(avg_similarity)
+                avg_loss = 1.0
+            weights.append(max(1 - avg_loss, 0.01))
 
-            # Compute positional weight
             position_weight = (idx + 1) / num_lines
             position_weight = position_weight ** self.position_weight_factor
             positional_weights.append(position_weight)
 
-        # Combine similarity weights with positional weights
         weights = torch.tensor(weights, dtype=torch.float32)
         positional_weights = torch.tensor(positional_weights, dtype=torch.float32)
         combined_weights = weights * positional_weights
-        combined_weights /= combined_weights.sum()
+        if combined_weights.sum() > 0:
+            combined_weights /= combined_weights.sum()
+        else:
+            combined_weights = torch.ones_like(weights) / weights.size(0)
 
-        # Calculate total loss
         total_loss = 0.0
         for positional_losses, weight in zip(all_positional_losses, combined_weights):
             for loss in positional_losses:
                 total_loss += weight * loss
 
-        return torch.tensor(total_loss, dtype=torch.float32)
+        return torch.as_tensor(total_loss, dtype=torch.float32)

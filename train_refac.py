@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from unsloth import FastLanguageModel
 from loss import SyllableLoss, BERTLoss, RhymeLoss
 from transformers import BertTokenizer, BertModel, GenerationConfig
-from trl import SFTTrainer
+from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from transformers import TrainingArguments
 from unsloth import is_bfloat16_supported
 from datasets import Dataset
@@ -84,51 +84,63 @@ def parse_args():
     return parser.parse_args()
 
 
-def load_and_prepare_data(train_file, EOS_token):
+def load_and_prepare_data(train_file, tokenizer):
     with open(train_file, "r", encoding="utf-8") as file:
         data = json.load(file)
     def formatting_prompts_func(data, EOS_token):
+
         texts = []
-        lyric_prompt = """Follow below Intruction.
+        responses = []
+
+        lyric_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
+
         ### Instruction:
-        Generate a song lyric line that matches the requested syllable structure and fits the Context based only on the English.
-        Avoid using excessive punctuation, meaningless repetitions, special characters, or words from other languages
+        Generate a song lyric line which will come after Context. You should follow Syllable structure in Next lyric line like Context.
 
         ### Input:
         Context:
         {context_lines}
-        Requested Syllable Structure: {processed_line}
+        Next lyric line:
+        (Syllable Structure : {response_structure})
 
-        ### Expected Response:
-        {response}"""
+        ### Response:
+        {response}
+        """
+
         for entry in data:
             try:
-                song_name = entry["song_name"]
                 input_lines = entry["input_lines"]
                 target_line = entry["target_line"]
 
-                context_lines = "\n".join([
-                    f"- {line['original_line']} (Syllable Structure: {line['processed_line']})"
-                    for line in input_lines
-                ])
-                processed_line = target_line["processed_line"]
-                response = target_line.get("original_line", "")
+                # Context 생성
+                context_lines = "\n".join(
+                    [f"(Syllable Structure: {line['processed_line']}) {line['original_line']}" for line in input_lines]
+                )
+
+                # Response 데이터
+                response = target_line["original_line"]
+                response_structure = target_line["processed_line"]
+
+                # Text (Prompt) 생성
                 text = lyric_prompt.format(
-                    song_name=song_name,
                     context_lines=context_lines,
-                    processed_line=processed_line,
-                    response=response,
+                    response_structure=response_structure,
+                    response=response
                 ) + EOS_token
-                texts.append(text)
+
+                texts.append(text)      # Prompt 저장
+                responses.append(response)  # Response 저장
 
             except KeyError as e:
                 print(f"KeyError: {e}")
 
         return {"text": texts}
 
+    EOS_token = tokenizer.eos_token
     formatted_data = formatting_prompts_func(data, EOS_token)
+    print('==============DATA DEBUG==============')
+    from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
     return Dataset.from_dict(formatted_data)
-
 
 
 def initialize_trainer(args, model, tokenizer, dataset):
@@ -161,22 +173,35 @@ def initialize_trainer(args, model, tokenizer, dataset):
     )
     return trainer
 
-def custom_loss(gt_line, generated_line, context_lines, gt_syllable, w_syllable, w_bert, w_rhyme):
+def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
     p_dict = Dictionary("simvecs")
+
+    context_lines, processed_line, response = extract_context_processed_response(gt_prompt)
+    generated_line = extract_output(generated_output)
+
+    print('Debugging...')
+    print(f'Requsted syllable : {processed_line}')
+    print(f'GT lyric : {response}')
+    print(f'Generated line : {generated_line}')
+    print('<<Full output of LLama>>')
+    print(generated_output)
+
     syllable_loss = SyllableLoss(coeff_sep = 1.0, coeff_count = 1.0)
     bert_loss = BERTLoss(model_name="bert-base-uncased")
     rhyme_loss = RhymeLoss(dictionary=p_dict, num_words=1, position_weight_factor=1.0)
 
-    l_syllable = syllable_loss(gt_syllable, generated_line)
-    l_bert = bert_loss(gt_line, generated_line)
+    l_syllable = syllable_loss(processed_line, generated_line)
+    l_lyric_bert = bert_loss(response, generated_line)
     l_rhyme = rhyme_loss(context_lines, generated_line)
+
+    #l_prompt_bert = bert_loss(generated_output,
 
 
     #Debug
-    print(f'Syllalbe Loss : {l_syllable}, Bert Loss : {l_bert}, Rhyme Loss : {l_rhyme}')
+    print(f'Syllalbe Loss : {l_syllable}, Bert Loss : {l_lyric_bert}, Rhyme Loss : {l_rhyme}')
 
     # Custom Loss 결합
-    total_loss = w_syllable * l_syllable + w_bert * l_bert + w_rhyme * l_rhyme
+    total_loss = w_syllable * l_syllable + w_bert * l_lyric_bert + w_rhyme * l_rhyme
     return total_loss
 
 class CustomSFTTrainer(SFTTrainer):
@@ -195,11 +220,12 @@ class CustomSFTTrainer(SFTTrainer):
 
         model.config.return_dict = True
         model.config.output_hidden_states = True
-
+        print('==============DEBUG : Loss============')
+        from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
+        original_loss = super(SFTTrainer,self).compute_loss(model,inputs, return_outputs=False)
 
         outputs = model(**inputs)
         logits = outputs.logits
-
         # logits 확인 및 계산
         if logits is None:
             if outputs.hidden_states is None:
@@ -237,27 +263,17 @@ class CustomSFTTrainer(SFTTrainer):
         total_loss = 0.0
 
         for gt_p, generated_p in zip(gt_prompt, generated_output):
-            context_lines, processed_line, response = extract_context_processed_response(gt_p)
-            generated_line = extract_output(generated_p)
-
-            print('Debugging...')
-            print(f'Requsted syllable : {processed_line}')
-            print(f'GT lyric : {response}')
-            print(f'Generated line : {generated_line}')
-            print('<<Full output of LLama>>')
-            print(generated_p)
 
             total_loss += custom_loss(
-                gt_line=response,
-                generated_line=generated_line,
-                context_lines = context_lines,
-                gt_syllable = processed_line,
+                gt_prompt=gt_p,
+                generated_output=generated_p,
                 w_syllable=self.custom_args.w_syllable,
                 w_bert=self.custom_args.w_bert,
                 w_rhyme = self.custom_args.w_rhyme
             )
         # 배치 평균 Loss 계산
         total_loss /= batch_size
+        total_loss = total_loss + original_loss
         return (total_loss, outputs) if return_outputs else total_loss
 
 def main():
@@ -285,7 +301,16 @@ def main():
         use_rslora = False,  # We support rank stabilized LoRA
         loftq_config = None, # And LoftQ
     )
-    dataset = load_and_prepare_data(args.train_file, tokenizer.eos_token)
+    dataset = load_and_prepare_data(args.train_file, tokenizer)
+
+    response_template = "### Response:"
+    instruction_template = "### Intruction:"
+
+
+    collator = DataCollatorForCompletionOnlyLM(
+        #instruction_template=instruction_template,
+        response_template = "### Response:",
+        tokenizer=tokenizer)
 
     training_args = TrainingArguments(
         per_device_train_batch_size=args.batch_size,
@@ -312,10 +337,15 @@ def main():
         dataset_num_proc=2,
         packing=False,
         args=training_args,
-        custom_args=args
+        custom_args=args,
+        data_collator=collator
     )
     print('Starting training')
     trainer.train()
+
+    print(f"Saving model and tokenizer")
+    model.save_pretrained("lora_model")  # 모델 저장
+    tokenizer.save_pretrained("lora_model")
 
 if __name__ == "__main__":
     main()
