@@ -10,7 +10,7 @@ from transformers import BertTokenizer, BertModel, GenerationConfig
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from transformers import TrainingArguments
 from unsloth import is_bfloat16_supported
-from datasets import Dataset
+from datasets import Dataset, load_dataset
 import sys, os
 current_dir = os.path.dirname(os.path.abspath(__file__))
 target_dir = os.path.join(current_dir, 'phonetic-word-embedding', 'src')
@@ -95,7 +95,7 @@ def load_and_prepare_data(train_file, tokenizer):
         lyric_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
         ### Instruction:
-        Generate a song lyric line which will come after Context. You should follow Syllable structure in Next lyric line like Context.
+        Generate a song lyric line which will come next. You should follow Syllable structure in Next lyric line like Context.
 
         ### Input:
         Context:
@@ -138,8 +138,6 @@ def load_and_prepare_data(train_file, tokenizer):
 
     EOS_token = tokenizer.eos_token
     formatted_data = formatting_prompts_func(data, EOS_token)
-    print('==============DATA DEBUG==============')
-    from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
     return Dataset.from_dict(formatted_data)
 
 
@@ -220,8 +218,6 @@ class CustomSFTTrainer(SFTTrainer):
 
         model.config.return_dict = True
         model.config.output_hidden_states = True
-        print('==============DEBUG : Loss============')
-        from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
         original_loss = super(SFTTrainer,self).compute_loss(model,inputs, return_outputs=False)
 
         outputs = model(**inputs)
@@ -236,7 +232,7 @@ class CustomSFTTrainer(SFTTrainer):
             outputs.logits = logits
 
         # labels 가져오기 및 범위 확인
-        labels = inputs["labels"]
+        labels = inputs["input_ids"]
         #vocab_size = self.tokenizer.vocab_size #deprecated
         vocab_size = self.processing_class.vocab_size
         labels = torch.where(
@@ -247,7 +243,14 @@ class CustomSFTTrainer(SFTTrainer):
 
         # 라벨과 생성된 텍스트 준비
         batch_size, seq_length = logits.size()[:2]
-        predictions = logits.argmax(dim=-1)  # 가장 높은 확률의 토큰 선택
+
+        probs = F.softmax(logits / 1, dim=-1)
+        predictions = []
+        for i in probs :
+            pred = torch.multinomial(i, num_samples=1)
+            pred = pred.squeeze(-1)
+            predictions.append(pred)
+        #predictions = logits.argmax(dim=-1)  # 가장 높은 확률의 토큰 선택
         generated_output = [
             self.processing_class.decode(predictions[i], skip_special_tokens=True)
             for i in range(batch_size)
@@ -272,8 +275,12 @@ class CustomSFTTrainer(SFTTrainer):
                 w_rhyme = self.custom_args.w_rhyme
             )
         # 배치 평균 Loss 계산
-        total_loss /= batch_size
-        total_loss = total_loss + original_loss
+        total_loss = total_loss / batch_size
+        if torch.isnan(original_loss):
+            print('Original loss is NaN')
+        else:
+            print(f'original_loss : {original_loss}')
+            total_loss = total_loss + original_loss
         return (total_loss, outputs) if return_outputs else total_loss
 
 def main():
@@ -303,14 +310,13 @@ def main():
     )
     dataset = load_and_prepare_data(args.train_file, tokenizer)
 
-    response_template = "### Response:"
-    instruction_template = "### Intruction:"
 
 
     collator = DataCollatorForCompletionOnlyLM(
-        #instruction_template=instruction_template,
+        instruction_template="### Instruction:",
         response_template = "### Response:",
         tokenizer=tokenizer)
+
 
     training_args = TrainingArguments(
         per_device_train_batch_size=args.batch_size,
