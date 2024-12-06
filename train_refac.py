@@ -58,7 +58,7 @@ def parse_args():
                         help="Number of gradient accumulation steps.")
     parser.add_argument("--learning_rate", type=float, default=2e-4,
                         help="Learning rate for training.")
-    parser.add_argument("--max_steps", type=int, default=2000,
+    parser.add_argument("--max_steps", type=int, default=600,
                         help="Maximum number of training steps.")
     parser.add_argument("--num_train_epochs", type=float, default=1,
                         help="num epoch. max_step is prior")
@@ -204,6 +204,11 @@ def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
     context_lines, processed_line, response = extract_context_processed_response(gt_prompt)
     generated_line = extract_output(generated_output)
 
+    if generated_line == None :
+        print("Wrong generation detected...")
+        total_loss = 100.0
+        return total_loss
+
     print('Debugging...')
     print(f'Requsted syllable : {processed_line}')
     print(f'GT lyric : {response}')
@@ -297,13 +302,19 @@ class CustomSFTTrainer(SFTTrainer):
 
         for gt_p, generated_p in zip(gt_prompt, generated_output):
 
-            total_loss += custom_loss(
+            loss = custom_loss(
                 gt_prompt=gt_p,
                 generated_output=generated_p,
                 w_syllable=self.custom_args.w_syllable,
                 w_bert=self.custom_args.w_bert,
                 w_rhyme = self.custom_args.w_rhyme
             )
+
+            #detect wrong generation
+            if loss == 100.0 :
+                loss = original_loss #more penalty
+
+            total_loss = total_loss + loss
 
         total_loss = total_loss + original_loss
         total_loss = total_loss / batch_size
@@ -383,7 +394,7 @@ def main():
         packing=False,
         args=training_args,
         custom_args=args,
-        #data_collator=collator
+        data_collator=collator
     )
 
 
