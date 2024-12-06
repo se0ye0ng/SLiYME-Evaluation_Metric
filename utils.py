@@ -30,7 +30,7 @@ def extract_context_processed_response(prompt):
     return context_lines, processed_line, response
 
 def extract_output(prompt):
-    output_match = re.search(r"### Output:\n(.*)", prompt, re.DOTALL)
+    output_match = re.search(r"### Response:\n(.*)", prompt, re.DOTALL)
     if output_match:
         return output_match.group(1).strip()
     return None

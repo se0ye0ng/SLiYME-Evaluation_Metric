@@ -33,6 +33,8 @@ from utils import extract_context_processed_response, extract_output
 def parse_args():
     parser = argparse.ArgumentParser(description="Fine-tune LLaMA with custom loss functions.")
 
+    # Debug
+    parser.add_argument("--debug", type = bool, default=False)
     # Model configuration
     parser.add_argument("--model_name", type=str, default="unsloth/Meta-Llama-3.1-8B",
                         help="Name of the pre-trained model.")
@@ -56,8 +58,11 @@ def parse_args():
                         help="Number of gradient accumulation steps.")
     parser.add_argument("--learning_rate", type=float, default=2e-4,
                         help="Learning rate for training.")
-    parser.add_argument("--max_steps", type=int, default=60,
+    parser.add_argument("--max_steps", type=int, default=2000,
                         help="Maximum number of training steps.")
+    parser.add_argument("--num_train_epochs", type=float, default=1,
+                        help="num epoch. max_step is prior")
+
     parser.add_argument("--logging_steps", type=int, default=1,
                         help="Steps interval for logging.")
     parser.add_argument("--seed", type=int, default=3407,
@@ -83,14 +88,15 @@ def parse_args():
 
     return parser.parse_args()
 
-
-def load_and_prepare_data(train_file, tokenizer):
+def load_and_prepare_data(train_file, EOS_token):
     with open(train_file, "r", encoding="utf-8") as file:
         data = json.load(file)
-    def formatting_prompts_func(data, EOS_token):
 
+    def formatting_prompts_func(data, EOS_token):
+        instructions = []
+        inputs = []
+        outputs = []
         texts = []
-        responses = []
 
         lyric_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
@@ -101,44 +107,61 @@ def load_and_prepare_data(train_file, tokenizer):
         Context:
         {context_lines}
         Next lyric line:
-        (Syllable Structure : {response_structure})
+        (Syllable Structure: {response_structure})
 
         ### Response:
         {response}
         """
-
         for entry in data:
             try:
+                # Extract relevant fields
+                song_name = entry["song_name"]
                 input_lines = entry["input_lines"]
                 target_line = entry["target_line"]
 
-                # Context 생성
                 context_lines = "\n".join(
                     [f"(Syllable Structure: {line['processed_line']}) {line['original_line']}" for line in input_lines]
                 )
 
-                # Response 데이터
                 response = target_line["original_line"]
                 response_structure = target_line["processed_line"]
+                # Populate fields
+                instruction = (
+                    "Generate a song lyric line which will come next. You should follow Syllable structure in Next lyric line like Context."
+                )
+                input_text = f"Context:\n{context_lines}\nNext lyric line:\n(Syllable Structure: {response_structure})"
+                output_text = response
+                #print("==========Debug : data =======")
+                #from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
 
-                # Text (Prompt) 생성
                 text = lyric_prompt.format(
                     context_lines=context_lines,
                     response_structure=response_structure,
-                    response=response
-                ) + EOS_token
+                    response=response) + EOS_token
 
-                texts.append(text)      # Prompt 저장
-                responses.append(response)  # Response 저장
+                # Append to lists
+                instructions.append(instruction)
+                inputs.append(input_text)
+                outputs.append(output_text)
+                texts.append(text)
 
             except KeyError as e:
                 print(f"KeyError: {e}")
 
-        return {"text": texts}
+        # Return dataset dictionary with all fields
+        return {
+            "instruction": instructions,
+            "input": inputs,
+            "output": outputs,
+            "text": texts,
+        }
 
-    EOS_token = tokenizer.eos_token
     formatted_data = formatting_prompts_func(data, EOS_token)
-    return Dataset.from_dict(formatted_data)
+
+    # Create a Dataset object with all fields
+    dataset = Dataset.from_dict(formatted_data)
+
+    return dataset
 
 
 def initialize_trainer(args, model, tokenizer, dataset):
@@ -172,6 +195,10 @@ def initialize_trainer(args, model, tokenizer, dataset):
     return trainer
 
 def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
+
+    print('<<Full output of LLama>>')
+    print(generated_output)
+
     p_dict = Dictionary("simvecs")
 
     context_lines, processed_line, response = extract_context_processed_response(gt_prompt)
@@ -181,8 +208,6 @@ def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
     print(f'Requsted syllable : {processed_line}')
     print(f'GT lyric : {response}')
     print(f'Generated line : {generated_line}')
-    print('<<Full output of LLama>>')
-    print(generated_output)
 
     syllable_loss = SyllableLoss(coeff_sep = 1.0, coeff_count = 1.0)
     bert_loss = BERTLoss(model_name="bert-base-uncased")
@@ -191,8 +216,6 @@ def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
     l_syllable = syllable_loss(processed_line, generated_line)
     l_lyric_bert = bert_loss(response, generated_line)
     l_rhyme = rhyme_loss(context_lines, generated_line)
-
-    #l_prompt_bert = bert_loss(generated_output,
 
 
     #Debug
@@ -215,12 +238,19 @@ class CustomSFTTrainer(SFTTrainer):
         Custom Loss를 SFTTrainer에 적용
         - inputs : Dictionary of input_ids, attention mask, labels
         """
-
         model.config.return_dict = True
         model.config.output_hidden_states = True
-        original_loss = super(SFTTrainer,self).compute_loss(model,inputs, return_outputs=False)
-
         outputs = model(**inputs)
+        original_loss = outputs.loss
+
+        if self.state.global_step <= 60:
+            print(f"We are at step {self.state.global_step}: only pass original loss")
+            original_loss = outputs.loss / self.custom_args.batch_size
+            print(f'original loss : {original_loss}')
+            return original_loss
+
+        print(f'Step {self.state.global_step} reflects custom loss...')
+
         logits = outputs.logits
         # logits 확인 및 계산
         if logits is None:
@@ -274,13 +304,9 @@ class CustomSFTTrainer(SFTTrainer):
                 w_bert=self.custom_args.w_bert,
                 w_rhyme = self.custom_args.w_rhyme
             )
-        # 배치 평균 Loss 계산
+
+        total_loss = total_loss + original_loss
         total_loss = total_loss / batch_size
-        if torch.isnan(original_loss):
-            print('Original loss is NaN')
-        else:
-            print(f'original_loss : {original_loss}')
-            total_loss = total_loss + original_loss
         return (total_loss, outputs) if return_outputs else total_loss
 
 def main():
@@ -308,7 +334,7 @@ def main():
         use_rslora = False,  # We support rank stabilized LoRA
         loftq_config = None, # And LoftQ
     )
-    dataset = load_and_prepare_data(args.train_file, tokenizer)
+    dataset = load_and_prepare_data(args.train_file, tokenizer.eos_token)
 
 
 
@@ -324,8 +350,8 @@ def main():
         warmup_steps=5,
         max_steps=args.max_steps,
         learning_rate=args.learning_rate,
-        fp16=True if args.dtype == "float16" else False,
-        bf16=True if args.dtype == "bfloat16" else False,
+        fp16=not is_bfloat16_supported(),
+        bf16=is_bfloat16_supported(),
         logging_steps=1,
         optim="adamw_8bit",
         weight_decay=0.01,
@@ -333,7 +359,20 @@ def main():
         seed=3407,
         output_dir=args.output_dir,
     )
-
+    '''
+    trainer = SFTTrainer(
+        model=model,
+        tokenizer=tokenizer,
+        train_dataset=dataset,
+        dataset_text_field="text",
+        max_seq_length=args.max_seq_length,
+        dataset_num_proc=2,
+        packing=False,
+        args=training_args,
+        #custom_args=args,
+        #data_collator=collator
+    )
+    '''
     trainer = CustomSFTTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -344,8 +383,13 @@ def main():
         packing=False,
         args=training_args,
         custom_args=args,
-        data_collator=collator
+        #data_collator=collator
     )
+
+
+    #print('=================Debug : before train ==============')
+    #from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
+
     print('Starting training')
     trainer.train()
 
