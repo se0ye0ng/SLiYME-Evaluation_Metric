@@ -46,7 +46,7 @@ def parse_args():
                         help="Enable 4-bit quantization to save memory.")
 
     # Dataset and file paths
-    parser.add_argument("--train_file", type=str, default="cleaned_data.json",
+    parser.add_argument("--train_file", type=str, default="train.json",
                         help="Path to the training dataset.")
     parser.add_argument("--output_dir", type=str, default="outputs",
                         help="Directory to save model checkpoints and outputs.")
