@@ -33,7 +33,6 @@ S-LiYME/
 │   ├── train_refac.py
 │   └── evaluate_w_rhyme.py
 ├── simvecs/
-│   └── (existing files)
 ├── requirements.txt
 ├── LICENSE
 └── README.md
