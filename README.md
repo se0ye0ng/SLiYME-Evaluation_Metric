@@ -18,3 +18,21 @@ For evaluation, you can follow the code below.
 python evaluate_w_rhyme.py
 ```
 
+## Convention
+S-LiYME/
+├── data/
+│   ├── train.json
+│   └── val.json
+├── models/
+│   └── loss.py
+├── utils/
+│   └── utils.py
+├── phonetic-word-embedding/
+├── scripts/
+│   ├── train_refac.py
+│   └── evaluate_w_rhyme.py
+├── simvecs/
+│   └── (existing files)
+├── requirements.txt
+├── LICENSE
+└── README.md
