@@ -58,7 +58,7 @@ def parse_args():
                         help="Number of gradient accumulation steps.")
     parser.add_argument("--learning_rate", type=float, default=2e-4,
                         help="Learning rate for training.")
-    parser.add_argument("--max_steps", type=int, default=600,
+    parser.add_argument("--max_steps", type=int, default=300,
                         help="Maximum number of training steps.")
     parser.add_argument("--num_train_epochs", type=float, default=1,
                         help="num epoch. max_step is prior")
@@ -196,8 +196,8 @@ def initialize_trainer(args, model, tokenizer, dataset):
 
 def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
 
-    print('<<Full output of LLama>>')
-    print(generated_output)
+    #print('<<Full output of LLama>>')
+    #print(generated_output)
 
     p_dict = Dictionary("simvecs")
 
@@ -209,10 +209,10 @@ def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
         total_loss = 100.0
         return total_loss
 
-    print('Debugging...')
-    print(f'Requsted syllable : {processed_line}')
-    print(f'GT lyric : {response}')
-    print(f'Generated line : {generated_line}')
+    #print('Debugging...')
+    #print(f'Requsted syllable : {processed_line}')
+    #print(f'GT lyric : {response}')
+    #print(f'Generated line : {generated_line}')
 
     syllable_loss = SyllableLoss(coeff_sep = 1.0, coeff_count = 1.0)
     bert_loss = BERTLoss(model_name="bert-base-uncased")
@@ -224,40 +224,33 @@ def custom_loss(gt_prompt, generated_output,w_syllable, w_bert, w_rhyme):
 
 
     #Debug
-    print(f'Syllalbe Loss : {l_syllable}, Bert Loss : {l_lyric_bert}, Rhyme Loss : {l_rhyme}')
+    #print(f'Syllalbe Loss : {l_syllable}, Bert Loss : {l_lyric_bert}, Rhyme Loss : {l_rhyme}')
 
-    # Custom Loss 결합
     total_loss = w_syllable * l_syllable + w_bert * l_lyric_bert + w_rhyme * l_rhyme
     return total_loss
 
 class CustomSFTTrainer(SFTTrainer):
     def __init__(self, *args, custom_args=None, **kwargs):
-        """
-        Custom Trainer initialization to accept additional arguments.
-        """
+
         super().__init__(*args, **kwargs)
         self.custom_args = custom_args
 
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        """
-        Custom Loss를 SFTTrainer에 적용
-        - inputs : Dictionary of input_ids, attention mask, labels
-        """
+
         model.config.return_dict = True
         model.config.output_hidden_states = True
         outputs = model(**inputs)
         original_loss = outputs.loss
 
         if self.state.global_step <= 60:
-            print(f"We are at step {self.state.global_step}: only pass original loss")
+            #print(f"We are at step {self.state.global_step}: only pass original loss")
             original_loss = outputs.loss / self.custom_args.batch_size
-            print(f'original loss : {original_loss}')
+            #print(f'original loss : {original_loss}')
             return original_loss
 
         print(f'Step {self.state.global_step} reflects custom loss...')
 
         logits = outputs.logits
-        # logits 확인 및 계산
         if logits is None:
             if outputs.hidden_states is None:
                 raise ValueError("Model does not return logits or hidden_states. Check the model configuration.")
@@ -266,9 +259,7 @@ class CustomSFTTrainer(SFTTrainer):
             logits = model.lm_head(hidden_states)
             outputs.logits = logits
 
-        # labels 가져오기 및 범위 확인
         labels = inputs["input_ids"]
-        #vocab_size = self.tokenizer.vocab_size #deprecated
         vocab_size = self.processing_class.vocab_size
         labels = torch.where(
             (labels >= 0) & (labels < vocab_size),
@@ -276,7 +267,6 @@ class CustomSFTTrainer(SFTTrainer):
             torch.tensor(self.processing_class.pad_token_id).to(labels.device)
         )
 
-        # 라벨과 생성된 텍스트 준비
         batch_size, seq_length = logits.size()[:2]
 
         probs = F.softmax(logits / 1, dim=-1)
@@ -285,7 +275,6 @@ class CustomSFTTrainer(SFTTrainer):
             pred = torch.multinomial(i, num_samples=1)
             pred = pred.squeeze(-1)
             predictions.append(pred)
-        #predictions = logits.argmax(dim=-1)  # 가장 높은 확률의 토큰 선택
         generated_output = [
             self.processing_class.decode(predictions[i], skip_special_tokens=True)
             for i in range(batch_size)
@@ -297,7 +286,6 @@ class CustomSFTTrainer(SFTTrainer):
             except OverflowError as e:
                 print(f"Error decoding label at index {i}: {labels[i]}")
                 raise e
-        # Custom Loss 계산
         total_loss = 0.0
 
         for gt_p, generated_p in zip(gt_prompt, generated_output):
@@ -347,14 +335,6 @@ def main():
     )
     dataset = load_and_prepare_data(args.train_file, tokenizer.eos_token)
 
-
-
-    collator = DataCollatorForCompletionOnlyLM(
-        instruction_template="### Instruction:",
-        response_template = "### Response:",
-        tokenizer=tokenizer)
-
-
     training_args = TrainingArguments(
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
@@ -370,20 +350,7 @@ def main():
         seed=3407,
         output_dir=args.output_dir,
     )
-    '''
-    trainer = SFTTrainer(
-        model=model,
-        tokenizer=tokenizer,
-        train_dataset=dataset,
-        dataset_text_field="text",
-        max_seq_length=args.max_seq_length,
-        dataset_num_proc=2,
-        packing=False,
-        args=training_args,
-        #custom_args=args,
-        #data_collator=collator
-    )
-    '''
+
     trainer = CustomSFTTrainer(
         model=model,
         tokenizer=tokenizer,
@@ -394,18 +361,13 @@ def main():
         packing=False,
         args=training_args,
         custom_args=args,
-        data_collator=collator
     )
-
-
-    #print('=================Debug : before train ==============')
-    #from IPython import embed; embed(colors="neutral")  # XXX DEBUG  # yapf: disable
 
     print('Starting training')
     trainer.train()
 
     print(f"Saving model and tokenizer")
-    model.save_pretrained("lora_model")  # 모델 저장
+    model.save_pretrained("lora_model")
     tokenizer.save_pretrained("lora_model")
 
 if __name__ == "__main__":
