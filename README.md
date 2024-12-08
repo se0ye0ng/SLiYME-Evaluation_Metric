@@ -19,6 +19,7 @@ python evaluate_w_rhyme.py
 ```
 
 ## Convention
+```bash
 S-LiYME/
 ├── data/
 │   ├── train.json
@@ -36,3 +37,4 @@ S-LiYME/
 ├── requirements.txt
 ├── LICENSE
 └── README.md
+```
