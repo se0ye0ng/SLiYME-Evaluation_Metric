@@ -17,6 +17,9 @@ Before you begin, make sure to install the required dependencies :
 ```bash
 pip install -r requirements.txt 
 ```
+The environment is as the following:
+- `python` == 3.9.12
+- `pip` == 24.3.1
 
 ## Execution
 ### Fine-tuning Llama for Lyric Generation 
