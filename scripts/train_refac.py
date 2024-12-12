@@ -1,3 +1,25 @@
+# Directory Designation
+import sys, os
+current_dir = os.path.dirname(os.path.abspath(__file__))    # SLiYME/scripts/
+project_root = os.path.abspath(os.path.join(current_dir, '..')) # SLiYME/
+sys.path.append(project_root)   # Add project root to sys.path(SLiYME)
+
+em_dir = os.path.join(project_root, 'phonetic-word-embedding', 'src')    # SLiYME/phonetic-word-embedding/src
+sys.path.append(em_dir)
+
+models_dir = os.path.join(project_root, 'models')
+if models_dir not in sys.path:
+    sys.path.append(models_dir)
+
+utils_dir = os.path.join(project_root, 'utils')  # SLiYME/utils
+if utils_dir not in sys.path:
+    sys.path.append(utils_dir)
+
+data_dir = os.path.join(project_root, 'data')
+if data_dir not in sys.path:
+    sys.path.append(data_dir)
+train_file_path = os.path.join(data_dir, 'train.json')
+
 import subprocess
 import json
 import torch
@@ -5,16 +27,12 @@ import re
 import argparse
 import torch.nn.functional as F
 from unsloth import FastLanguageModel
-from loss import SyllableLoss, BERTLoss, RhymeLoss
+from models.loss import SyllableLoss, BERTLoss, RhymeLoss
 from transformers import BertTokenizer, BertModel, GenerationConfig
 from trl import SFTTrainer, DataCollatorForCompletionOnlyLM
 from transformers import TrainingArguments
 from unsloth import is_bfloat16_supported
 from datasets import Dataset, load_dataset
-import sys, os
-current_dir = os.path.dirname(os.path.abspath(__file__))
-target_dir = os.path.join(current_dir, 'phonetic-word-embedding', 'src')
-sys.path.append(target_dir)
 import embedding
 from embedding import Dictionary
 from utils import extract_context_processed_response, extract_output
@@ -46,7 +64,7 @@ def parse_args():
                         help="Enable 4-bit quantization to save memory.")
 
     # Dataset and file paths
-    parser.add_argument("--train_file", type=str, default="train.json",
+    parser.add_argument("--train_file", type=str, default=train_file_path,
                         help="Path to the training dataset.")
     parser.add_argument("--output_dir", type=str, default="outputs",
                         help="Directory to save model checkpoints and outputs.")

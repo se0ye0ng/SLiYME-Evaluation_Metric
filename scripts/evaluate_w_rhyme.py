@@ -1,3 +1,29 @@
+# Directory Designation
+import sys, os
+current_dir = os.path.dirname(os.path.abspath(__file__))    # SLiYME/scripts/
+project_root = os.path.abspath(os.path.join(current_dir, '..')) # SLiYME/
+sys.path.append(project_root)   # Add project root to sys.path(SLiYME)
+
+em_dir = os.path.join(project_root, 'phonetic-word-embedding', 'src')    # SLiYME/phonetic-word-embedding/src
+sys.path.append(em_dir)
+
+models_dir = os.path.join(project_root, 'models')
+if models_dir not in sys.path:
+    sys.path.append(models_dir)
+
+utils_dir = os.path.join(project_root, 'utils')  # SLiYME/utils
+if utils_dir not in sys.path:
+    sys.path.append(utils_dir)
+
+data_dir = os.path.join(project_root, 'data')
+if data_dir not in sys.path:
+    sys.path.append(data_dir)
+train_file_path = os.path.join(data_dir, 'train.json')
+val_file_path = os.path.join(data_dir, 'val.json')
+
+# Designate Specific Model You want to evaluate
+trained_model_path = os.path.join(project_root, 'outputs', 'checkpoint-300')
+
 import json
 from bert_score import score as bert_score
 from rouge_score import rouge_scorer
@@ -11,10 +37,6 @@ max_seq_length = 2048
 dtype = None
 load_in_4bit = True
 
-import sys, os
-current_dir = os.path.dirname(os.path.abspath(__file__))
-target_dir = os.path.join(current_dir, 'phonetic-word-embedding', 'src')
-sys.path.append(target_dir)
 import embedding
 from embedding import Dictionary
 rhyme_dictionary = Dictionary("simvecs")  # 경로 수정
@@ -154,17 +176,19 @@ Next lyric line:
     avg_scores = {key: value / num_samples for key, value in total_scores.items()}
     return results, avg_scores
 
+# "checkpoint-300"
+
 if __name__ == "__main__":
     model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name="checkpoint-300",
+        model_name=trained_model_path,
         max_seq_length=max_seq_length,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
     )
     FastLanguageModel.for_inference(model)
 
-    val_file_path = "/home/hyunseo/nlp/data/val.json"
-    results, avg_scores = evaluate_model(val_file_path, model, tokenizer)
+    val_file_path_specific = val_file_path
+    results, avg_scores = evaluate_model(val_file_path_specific, model, tokenizer)
 
     output_file = "evaluation_results_with_rhyme.json"
     with open(output_file, "w", encoding="utf-8") as file:

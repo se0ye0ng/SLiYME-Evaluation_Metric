@@ -1,4 +1,4 @@
-# S:LiYME: Scores for Lyrics in Rhyme
+# S-LiYME: Scores for Lyrics in Rhyme
 Official Repository for SLiYME Project @DL&amp;NLP
 ---
 ## Introduction
@@ -13,16 +13,18 @@ S-LiYME generates song lyrics by considering syllable structure, context consist
 - `simvecs/`: pre-trained vector file
 
 ## Installation
-Before you begin, make sure to install the required dependencies :
+Before you begin, make sure to install the required dependencies through these steps:
 
 ### Env Installation
+```bash
+conda env create -f environment.yaml
+conda activate unsloth_env
+```
 
+### Pip dependencies Installation
 ```bash
 pip install -r requirements.txt 
 ```
-The environment is as the following:
-- `python` == 3.9.12
-- `pip` == 24.3.1
 
 ## Execution
 ### Fine-tuning Llama for Lyric Generation 
@@ -30,7 +32,6 @@ For fine-tuning, you can follow the code below.
 ```bash
 python train_refac.py 
 ```
-
 
 For evaluation, you can follow the code below.
 ```bash
@@ -46,7 +47,9 @@ S-LiYME/
 ├── models/
 │   └── loss.py
 ├── utils/
-│   └── utils.py
+│   ├── utils.py
+│   ├── llama_inference.ipynb
+│   └── evaluate_w_rhyme.py
 ├── phonetic-word-embedding/
 ├── scripts/
 │   ├── train_refac.py
