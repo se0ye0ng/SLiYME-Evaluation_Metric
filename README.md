@@ -1,31 +1,52 @@
-# S-LiYME: Scores for Lyrics in Rhyme
+## S-LiYME: Scores for Lyrics in Rhyme
 Official Repository for SLiYME Project @DL&amp;NLP
+\rightarrow
+# Evaluation Metric for Lyric Generation
 ---
 ## Introduction
+**S-LiYME; Evaluation Metric System**
 S-LiYME generates song lyrics by considering syllable structure, context consistency, and rhyme.
+*This Repository is 'evaluation metric system' for lyric generation model including S-LiYME.*
 
-## Code Structure
+## Overview
+This system evaluates the quality of generated lyrics using:
+- **BERT Score**: Evaluates semantic similarity.
+- **ROUGE Score**: Evaluates n-gram overlap.
+- **Rhyme Score**: Evaluates phonetic similarity between lines.
+
+## Structure
+- `evaluate_metric.py`: Main script for evaluation.
+- `utils.py`: Utility functions.
+- `simvecs`: **Example** Phonetic similarity dictionary. Pre-trained vector file (with `llama-3.1-8b').
 - `data/`: dataset for training and evaluation
-- `models/`: model related files
-- `utils/`: utility function file
 - `phonetic-word-embedding/`: phonetic word embedding related file
-- `scripts/`: scripts for training and evaluation
-- `simvecs/`: pre-trained vector file
 
-## Installation
-Before you begin, make sure to install the required dependencies through these steps:
-
-### Env Installation
+## Setup
+1. Install environment:
 ```bash
 conda env create -f environment.yaml
-conda activate unsloth_env
+conda activate eval
 ```
 
-### Pip dependencies Installation
+2. Install dependencies:
 ```bash
-pip install -r requirements.txt 
+pip install -r requirements.txt
 ```
 
+## Usage
+1. Prepare the data
+place your evaluation dataset(ex.`val.json`) in the `data/` directory.
+
+2. Run the Evaluation
+To evaluate a model:
+```bash
+python scripts/evaluate_metric.py
+```
+
+3. View the Results
+The results will be saved as a JSON file (`evaluation_results.json`) in the root directory.
+
+---
 ## Execution
 ### Fine-tuning Llama for Lyric Generation 
 For fine-tuning, you can follow the code below. 
@@ -40,22 +61,17 @@ python evaluate_w_rhyme.py
 
 ## Convention
 ```bash
-S-LiYME/
+SLiYME-Evaluation_Metric/
 ├── data/
-│   ├── train.json
-│   └── val.json
-├── models/
-│   └── loss.py
-├── utils/
-│   ├── utils.py
-│   ├── llama_inference.ipynb
-│   └── evaluate_w_rhyme.py
-├── phonetic-word-embedding/
+│   ├── train.json          # 훈련 데이터셋
+│   ├── val.json            # 평가 데이터셋
 ├── scripts/
-│   ├── train_refac.py
-│   └── evaluate_w_rhyme.py
-├── simvecs/
-├── requirements.txt
-├── LICENSE
-└── README.md
+│   └── evaluate_metric.py  # 평가 메트릭 메인 코드
+├── utils/
+│   └── utils.py            # 유틸리티 함수
+├── phonetic-word-embedding/
+├── simvecs                # 음운 유사도 계산을 위한 사전 파일
+├── requirements.txt       # 필요한 라이브러리 목록
+├── environment.yaml       # conda environment 설치 파일
+└── README.md              # 프로그램 설명 및 실행 가이드
 ```

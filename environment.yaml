@@ -1,22 +1,21 @@
-name: unsloth_env
+name: eval
 channels:
-  - pytorch
-  - nvidia
-  - xformers
   - defaults
-dependencies:
-  - python=3.11
   - pytorch
-  - pytorch-cuda=12.1
-  - cudatoolkit
-  - xformers
+  - conda-forge
+dependencies:
+  - python=3.10
   - pip
+  - numpy
+  - pandas
+  - pytorch=1.12.1
+  - torchvision=0.13.1
+  - torchaudio=0.12.1
+  - cudatoolkit=11.3
   - pip:
-      - "unsloth[colab-new] @ git+https://github.com/unslothai/unsloth.git"
-      - bert-score
-      - rouge-score
-      - scikit-learn
-      - trl
-      - peft
-      - accelerate
-      - bitsandbytes
+      - bert-score==0.3.13
+      - rouge-score==0.1.2
+      - transformers==4.46.3
+      - scikit-learn==1.5.2
+      # - phonetic-word-embedding @ git+https://github.com/<repository>
+      - filelock
