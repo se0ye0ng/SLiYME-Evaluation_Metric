@@ -19,3 +19,4 @@ dependencies:
       - scikit-learn==1.5.2
       # - phonetic-word-embedding @ git+https://github.com/<repository>
       - filelock
+      - pronouncing==0.2.0

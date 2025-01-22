@@ -23,7 +23,7 @@ from bert_score import score as bert_score
 from rouge_score import rouge_scorer
 import torch
 from embedding import Dictionary
-from utils import extract_context_processed_response
+from utils import extract_context_processed_response, calculate_rhyme_similarity
 
 from tqdm import tqdm
 from transformers import AutoTokenizer, AutoModelForCausalLM, LlamaForCausalLM, LlamaTokenizer
@@ -43,12 +43,25 @@ def rhyme_score(previous_lines, generated_line, dictionary, num_words=1, positio
 
     for idx, prev_line in enumerate(previous_lines):
         prev_tail_words = get_tail_words(prev_line, num_words)
-        positional_similarities = [
-                dictionary.score(prev_tail_words[i], generated_tail_words[i])
-                if i < len(prev_tail_words) and i < len(generated_tail_words)
-                else 0
-                for i in range(num_words)
-        ]
+        # positional_similarities = [
+        #         dictionary.score(prev_tail_words[i], generated_tail_words[i])
+        #         if i < len(prev_tail_words) and i < len(generated_tail_words)
+        #         else 0
+        #         for i in range(num_words)
+        # ]
+        
+        # 최대 단어 수 길이 제한: num_words보다 적은 단어가 있을 경우 방지
+        effective_num_words = min(len(prev_tail_words), len(generated_tail_words))
+        positional_similarities = []
+        for i in range(effective_num_words):
+            try:
+                similarity = dictionary.score(prev_tail_words[i], generated_tail_words[i])
+            except KeyError:
+                # If the word is not in the dictionary, calculate phonetic similarity
+                similarity = calculate_rhyme_similarity(prev_tail_words[i], generated_tail_words[i])
+                print(f"Calculated similarity for missing words: {prev_tail_words[i]} and {generated_tail_words[i]}")
+            positional_similarities.append(similarity)
+            
         avg_similarity = sum(positional_similarities) / len(positional_similarities) if positional_similarities else 0
         weights.append(avg_similarity)
         positional_weights.append(((idx + 1) / num_lines) ** position_weight_factor)
@@ -102,8 +115,12 @@ def evaluate_model(val_file_path, model, tokenizer):
     }
     num_samples = len(val_data)
 
+    results_file = "evaluation_results.json"
+    with open(results_file, "w", encoding="utf-8") as output_file:
+        output_file.write("[")
+        
     # Process each sample in the validation data
-    for entry in tqdm(val_data, desc="Evaluating", unit="sample"):
+    for entry_index, entry in enumerate(tqdm(val_data, desc="Evaluating", unit="sample")):
         song_name = entry["song_name"]
         context_lines = [line["original_line"] for line in entry["input_lines"]]
         target_line = entry["target_line"]["original_line"]
@@ -120,30 +137,32 @@ def evaluate_model(val_file_path, model, tokenizer):
         scores = compute_scores(generated_response, target_line, context_lines)
         print(f"Sample: {song_name}, Scores: {scores}")
 
-        # Accumulate scores
-        for key in total_scores:
-            total_scores[key] += scores[key]
-
         # Append individual result
-        results.append({
+        result = {
             "song_name": song_name,
             "generated_response": generated_response,
             "target_line": target_line,
             "scores": scores
-        })
+        }
+        results.append(result)
+        
+        # Save results to JSON
+        with open(results_file, "a", encoding="utf-8") as output_file:
+            #output_file.write(json.dump({"results": results, "average_scores": avg_scores}, file, indent=4, ensure_ascii=False))
+            output_file.write(json.dumps(result, indent=4, ensure_ascii=False))
+            if entry_index < len(val_data) - 1:
+                output_file.write(",\n")
+        # # Accumulate scores
+        # for key in total_scores:
+        #     total_scores[key] += scores[key]
 
     # Compute average scores
     avg_scores = {key: value / num_samples for key, value in total_scores.items()}
 
-    # Save results to JSON
-    print("Saving results to JSON...")
-    try:
-        with open("evaluation_results.json", "w", encoding="utf-8") as file:
-            json.dump({"results": results, "average_scores": avg_scores}, file, indent=4, ensure_ascii=False)
-        print("Results saved successfully.")
-    except Exception as e:
-        print(f"Error saving results: {e}")
-
+    with open(results_file, "a", encoding="utf-8") as output_file:
+        output_file.write("]")
+        
+    print(f"Total {num_samples} Samples' Results saved successfully in {results_file}.")
     return results, avg_scores
 
 if __name__ == "__main__":

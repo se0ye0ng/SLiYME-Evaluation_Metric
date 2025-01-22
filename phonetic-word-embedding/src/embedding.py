@@ -12,6 +12,17 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import normalize
 
+embedding_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(embedding_dir, '..', '..'))
+exec_dir = os.path.join(project_root, 'scripts')
+if exec_dir not in sys.path:
+    sys.path.append(exec_dir)
+utils_dir = os.path.join(project_root, 'utils')
+if utils_dir not in sys.path:
+    sys.path.append(utils_dir)
+    
+from utils import calculate_rhyme_similarity
+
 class Dictionary:
     def __init__(self, filepath, encoding="latin1"):
         self.words = list()
@@ -36,10 +47,27 @@ class Dictionary:
         return self.dictionary[self.lookup[word.strip().upper()], :]
 
     def score(self, word1, word2):
-        v1 = self.norms[self.lookup[word1.strip().upper()], :]
-        v2 = self.norms[self.lookup[word2.strip().upper()], :]
-        return np.sum(v1*v2)
+        try:
+            v1 = self.norms[self.lookup[word1.strip().upper()], :]
+            v2 = self.norms[self.lookup[word2.strip().upper()], :]
+            return np.sum(v1*v2)
+        except KeyError:
+            # simvecs 사전에 없는 단어들의 경우 phonetic similarity(발음 기반 유사도) 활용
+            print(f"KeyError: Missing {word1} or {word2} in dictionary. Calculating phonetic similarity.")
+            similarity = calculate_rhyme_similarity(word1, word2)
+        
+            # 새로운 단어를 딕셔너리에 추가
+            word1_upper = word1.strip().upper()
+            self.lookup[word1_upper] = len(self.words)
+            self.words.append(word1_upper)
+            
+            # 임의의 벡터로 확장 (유사도를 기반으로 벡터 업데이트 가능)
+            random_vector = np.random.rand(self.dictionary.shape[1]) * similarity
+            self.dictionary = np.vstack([self.dictionary, random_vector])
+            self.norms = normalize(self.dictionary, axis=1)
 
+            return similarity
+        
     def word(self, vec, n=None):
         v = vec / np.linalg.norm(vec)
         dots = np.dot(self.norms, v)
